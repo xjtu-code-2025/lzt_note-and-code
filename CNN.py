@@ -5,21 +5,60 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 
-# stride，padding
+## 无stride，padding：
+# class MyConv2d(nn.Module):
+#     def __init__(self, in_channels, out_channels, kernel_size):
+#         super(MyConv2d, self).__init__()
+#         self.weight = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size) * 0.01)
+#         self.bias = nn.Parameter(torch.zeros(out_channels))
+#         self.kernel_size = kernel_size
+
+#     def forward(self, x):
+#         batch_size, in_channels, H, W = x.shape
+#         out_channels = self.weight.shape[0]
+#         k = self.kernel_size
+#         out_H = H - k + 1
+#         out_W = W - k + 1
+
+#         output = torch.zeros((batch_size, out_channels, out_H, out_W), device=x.device)
+
+#         for b in range(batch_size):
+#             for oc in range(out_channels):
+#                 for ic in range(in_channels):
+#                     for i in range(out_H):
+#                         for j in range(out_W):
+#                             region = x[b, ic, i:i + k, j:j + k]
+#                             output[b, oc, i, j] += torch.sum(region * self.weight[oc, ic])
+#                 output[b, oc] += self.bias[oc]
+#         return output
+
+# 修改stride=2，同时加入padding（默认值分别为2和1）
 class MyConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=2, padding=1):
         super(MyConv2d, self).__init__()
         self.weight = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size) * 0.01)
         self.bias = nn.Parameter(torch.zeros(out_channels))
         self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
 
     def forward(self, x):
         batch_size, in_channels, H, W = x.shape
         out_channels = self.weight.shape[0]
         k = self.kernel_size
-        out_H = H - k + 1
-        out_W = W - k + 1
-
+        p = self.padding
+        
+        # 计算输出尺寸 (考虑padding和stride)
+        out_H = (H + 2*p - k) // self.stride + 1
+        out_W = (W + 2*p - k) // self.stride + 1
+        
+        # 对输入进行padding
+        if self.padding > 0:
+            x_padded = torch.zeros((batch_size, in_channels, H + 2*p, W + 2*p), device=x.device)
+            x_padded[:, :, p:p+H, p:p+W] = x  
+        else:
+            x_padded = x
+        
         output = torch.zeros((batch_size, out_channels, out_H, out_W), device=x.device)
 
         for b in range(batch_size):
@@ -27,11 +66,13 @@ class MyConv2d(nn.Module):
                 for ic in range(in_channels):
                     for i in range(out_H):
                         for j in range(out_W):
-                            region = x[b, ic, i:i + k, j:j + k]
+                            # 计算输入区域的起始位置（考虑stride）
+                            h_start = i * self.stride
+                            w_start = j * self.stride
+                            region = x_padded[b, ic, h_start:h_start + k, w_start:w_start + k]
                             output[b, oc, i, j] += torch.sum(region * self.weight[oc, ic])
                 output[b, oc] += self.bias[oc]
         return output
-
 
 class MyBatchNorm2d(nn.Module):
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
@@ -64,7 +105,8 @@ class MyCNN(nn.Module):
         self.conv = MyConv2d(1, 8, 3)
         self.bn = MyBatchNorm2d(8)
         self.pool = nn.MaxPool2d(2)
-        self.fc = nn.Linear(8 * 13 * 13, 10)  # 28 - 3 + 1 = 26 -> pool -> 13
+        # self.fc = nn.Linear(8 * 13 * 13, 10)  # 28 - 3 + 1 = 26 -> pool -> 13   # 为stride和padding是1和0的情况
+        self.fc = nn.Linear(8 * 7 * 7, 10)  
 
     def forward(self, x):
         x = self.conv(x)
